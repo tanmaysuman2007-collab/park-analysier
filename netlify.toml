@@ -1,0 +1,8 @@
+[build]
+  publish = "."
+
+# Keep the old file URL working
+[[redirects]]
+  from = "/2live-map-tracker.html"
+  to = "/"
+  status = 301
