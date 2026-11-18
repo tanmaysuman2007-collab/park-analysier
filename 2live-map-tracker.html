@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Civic Issue Tracker - Live Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+:root{--issue:#d23f3f;--filed:#e29a0b;--wip:#2b78d8;--done:#2a9a58;--bd:#d9e0d6;--mu:#66756b;--tx:#1b2a21;--bg:#f3f5f0}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;color:var(--tx);background:var(--bg)}
+.app{display:grid;grid-template-columns:360px 1fr;height:100%}
+.side{display:flex;flex-direction:column;gap:8px;padding:12px;overflow:auto;border-right:1px solid var(--bd)}
+#map{height:100%;min-height:360px}
+h1{font-family:Georgia,serif;font-size:1.35rem;margin:0}
+.sub{color:var(--mu);font-size:.82rem;margin:0}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stat{background:#fff;border:1px solid var(--bd);border-left:5px solid var(--c);border-radius:8px;padding:6px 9px;text-align:left;cursor:pointer;font:inherit}
+.stat b{display:block;font-size:1.3rem;line-height:1.1}.stat span{font-size:.76rem;color:var(--mu)}
+.stat[aria-pressed="false"]{opacity:.45}
+input,select,textarea,button{font:inherit;border:1px solid var(--bd);border-radius:8px;padding:6px 9px;background:#fff;color:var(--tx)}
+button{cursor:pointer}.pri{background:#1f5f3f;color:#fff;border-color:#1f5f3f;font-weight:600}
+.row{display:flex;gap:6px;flex-wrap:wrap}.row>*{flex:1;min-width:90px}
+.item{background:#fff;border:1px solid var(--bd);border-radius:8px;padding:8px 10px;cursor:pointer}
+.item.sel{border-color:var(--tx)}.item h3{margin:0 0 2px;font-size:.95rem}
+.tag{display:inline-block;font-size:.72rem;padding:1px 8px;border-radius:99px;background:var(--c);color:#fff;margin-right:4px}
+.meta{font-size:.8rem;color:var(--mu);margin-top:3px}
+.box{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:10px}
+.steps{display:flex;gap:4px;margin:8px 0}.steps i{flex:1;height:7px;border-radius:4px;background:var(--bd)}.steps i.on{background:var(--c)}
+.adding #map{cursor:crosshair}
+@media(max-width:800px){.app{grid-template-columns:1fr;grid-template-rows:55vh auto;height:auto}#map{order:-1;height:55vh}.side{border-right:0}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="side">
+  <h1>City Civic Issue Tracker</h1>
+  <p class="sub">Live map of public areas with reported damage and sanitation issues, complaint status and repair progress. (Demo data)</p>
+  <div class="stats" id="stats"></div>
+  <div class="row"><input id="q" type="search" placeholder="Search by name"><select id="typ"><option value="">All issue types</option><option value="damage">Damage</option><option value="dirty">Sanitation</option></select></div>
+  <div class="row"><button class="pri" id="add">+ Add Zone</button><button id="loc">My Location</button><button id="ncr">View NCR</button></div>
+  <div class="box" id="detail"></div>
+  <div id="list" style="display:flex;flex-direction:column;gap:6px"></div>
+</div>
+<div id="map"></div>
+</div>
+<script>
+if (typeof L === "undefined") {
+  document.body.innerHTML = "<p style='padding:20px'>Leaflet failed to load. Check your internet connection.</p>";
+} else {
+var ST=[{k:"issue",n:"Reported",c:"#d23f3f"},{k:"filed",n:"Complaint Filed",c:"#e29a0b"},{k:"wip",n:"In Progress",c:"#2b78d8"},{k:"done",n:"Resolved",c:"#2a9a58"}];
+var TY={damage:"Damage",dirty:"Sanitation"};
+var SEED=[
+{id:1,name:"Sohna Town Park",type:"damage",st:"wip",lat:28.2476,lng:77.0645,r:160,note:"Swings are broken and the boundary wall has collapsed.",date:"2026-10-28"},
+{id:2,name:"Bus Stand Area",type:"dirty",st:"filed",lat:28.2530,lng:77.0700,r:200,note:"Garbage is not being collected regularly.",date:"2026-11-02"},
+{id:3,name:"Sohna Road Footpath",type:"damage",st:"done",lat:28.2410,lng:77.0580,r:180,note:"Footpath repair completed.",date:"2026-10-10"},
+{id:4,name:"Vegetable Market",type:"dirty",st:"issue",lat:28.2450,lng:77.0740,r:150,note:"Blocked drain causing foul odour and unsanitary conditions.",date:"2026-11-12"},
+{id:5,name:"Colony Park",type:"damage",st:"filed",lat:28.2560,lng:77.0590,r:170,note:"Benches and street lights are damaged.",date:"2026-11-05"},
+{id:6,name:"Pond Embankment",type:"dirty",st:"done",lat:28.2380,lng:77.0680,r:140,note:"Cleanliness drive completed.",date:"2026-10-20"}];
+var items=[],sel=null,on={issue:1,filed:1,wip:1,done:1};
+try{var s=localStorage.getItem("civic-live4");items=s?JSON.parse(s):SEED}catch(e){items=SEED}
+if(!Array.isArray(items))items=SEED;
+function save(){try{localStorage.setItem("civic-live4",JSON.stringify(items))}catch(e){}}
+function esc(t){return String(t).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function stOf(k){return ST.filter(function(s){return s.k===k})[0]||ST[0]}
+
+var map=L.map("map").setView([28.2476,77.0645],14);
+var sat=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Tiles &copy; Esri"});
+var street=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap contributors"});
+sat.addTo(map);
+L.control.layers({"Satellite":sat,"Map":street}).addTo(map);
+var fell=false;
+sat.on("tileerror",function(){if(fell)return;fell=true;map.removeLayer(sat);street.addTo(map)});
+
+var layer=L.layerGroup().addTo(map);
+function vis(){var q=document.getElementById("q").value.toLowerCase(),t=document.getElementById("typ").value;
+ return items.filter(function(i){return on[i.st]&&(!t||i.type===t)&&(!q||i.name.toLowerCase().indexOf(q)>-1)})}
+function render(){
+ var v=vis();
+ document.getElementById("stats").innerHTML=ST.map(function(s){return '<button class="stat" style="--c:'+s.c+'" data-k="'+s.k+'" aria-pressed="'+(on[s.k]?"true":"false")+'"><b>'+items.filter(function(i){return i.st===s.k}).length+'</b><span>'+s.n+'</span></button>'}).join("");
+ layer.clearLayers();
+ v.forEach(function(i){var s=stOf(i.st);
+  var c=L.circle([i.lat,i.lng],{radius:i.r,color:s.c,weight:i.id===sel?4:2,fillColor:s.c,fillOpacity:i.id===sel?.5:.3}).addTo(layer);
+  c.bindTooltip(esc(i.name)+" - "+s.n);
+  c.on("click",function(e){L.DomEvent.stopPropagation(e);pick(i.id,false)})});
+ document.getElementById("list").innerHTML=v.length?v.map(function(i){var s=stOf(i.st);
+  return '<div class="item'+(i.id===sel?" sel":"")+'" data-id="'+i.id+'" style="--c:'+s.c+'"><h3>'+esc(i.name)+'</h3><span class="tag">'+s.n+'</span><span class="tag" style="background:var(--mu)">'+TY[i.type]+'</span><div class="meta">'+esc(i.note||"")+'</div></div>'}).join(""):'<div class="item">No results found. Adjust the filters or add a new zone.</div>';
+ detail()}
+function detail(){
+ var d=document.getElementById("detail"),i=items.filter(function(x){return x.id===sel})[0];
+ if(!i){d.innerHTML='<b>Select a zone</b><div class="meta">Click a zone on the map or an item in the list.</div>';return}
+ var idx=ST.indexOf(stOf(i.st)),s=ST[idx];d.style.setProperty("--c",s.c);
+ d.innerHTML='<b>'+esc(i.name)+'</b><div><span class="tag" style="background:'+s.c+'">'+s.n+'</span><span class="tag" style="background:var(--mu)">'+TY[i.type]+'</span></div><div class="meta">Reported: '+esc(i.date||"")+' | Radius: '+i.r+' m</div><p>'+esc(i.note||"")+'</p><div class="steps">'+ST.map(function(_,j){return '<i class="'+(j<=idx?"on":"")+'"></i>'}).join("")+'</div><div class="row">'+(idx<3?'<button class="pri" id="next">Advance to: '+ST[idx+1].n+'</button>':'')+'<button id="del">Delete</button></div>'}
+function pick(id,fly){sel=id;var i=items.filter(function(x){return x.id===id})[0];if(fly&&i)map.flyTo([i.lat,i.lng],16);render()}
+document.addEventListener("click",function(e){
+ var t=e.target.closest("[data-k]");if(t){on[t.dataset.k]=on[t.dataset.k]?0:1;render();return}
+ var p=e.target.closest("[data-id]");if(p){pick(+p.dataset.id,true);return}
+ if(e.target.id==="next"){var i=items.filter(function(x){return x.id===sel})[0];i.st=ST[ST.indexOf(stOf(i.st))+1].k;save();render()}
+ if(e.target.id==="del"){items=items.filter(function(x){return x.id!==sel});sel=null;save();render()}});
+document.getElementById("q").oninput=render;document.getElementById("typ").onchange=render;
+document.getElementById("ncr").onclick=function(){map.setView([28.55,77.15],9)};
+document.getElementById("loc").onclick=function(){map.locate({setView:true,maxZoom:16})};
+map.on("locationerror",function(){alert("Unable to retrieve your location. Please allow location access in your browser.")});
+document.getElementById("add").onclick=function(){document.body.classList.add("adding");
+ document.getElementById("detail").innerHTML='<b>Click on the map where the zone should be placed</b>';
+ map.once("click",function(e){document.body.classList.remove("adding");form(e.latlng)})};
+function form(ll){
+ var d=document.getElementById("detail"),pre=L.circle(ll,{radius:150,color:"#555",dashArray:"4"}).addTo(map);
+ d.innerHTML='<b>New Zone</b><div style="display:grid;gap:6px;margin-top:6px"><input id="fn" placeholder="Park or area name"><div class="row"><select id="ft"><option value="damage">Damage</option><option value="dirty">Sanitation</option></select><select id="fs">'+ST.map(function(s){return '<option value="'+s.k+'">'+s.n+'</option>'}).join("")+'</select></div><label class="meta">Zone radius: <span id="rv">150</span> m<input id="fr" type="range" min="50" max="600" step="10" value="150" style="width:100%"></label><textarea id="fo" rows="2" placeholder="Describe the issue"></textarea><div class="row"><button class="pri" id="fsave">Save</button><button id="fc">Cancel</button></div></div>';
+ document.getElementById("fr").oninput=function(){document.getElementById("rv").textContent=this.value;pre.setRadius(+this.value)};
+ document.getElementById("fc").onclick=function(){map.removeLayer(pre);detail()};
+ document.getElementById("fsave").onclick=function(){var n=document.getElementById("fn").value.trim();if(!n){document.getElementById("fn").focus();return}
+  var id=Date.now();items.push({id:id,name:n,type:document.getElementById("ft").value,st:document.getElementById("fs").value,lat:ll.lat,lng:ll.lng,r:+document.getElementById("fr").value,note:document.getElementById("fo").value.trim(),date:new Date().toISOString().slice(0,10)});
+  map.removeLayer(pre);sel=id;save();render()}}
+render();
+}
+</script>
+</body>
+</html>
