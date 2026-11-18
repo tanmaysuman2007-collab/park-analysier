@@ -1,0 +1,8 @@
+[build]
+  publish = "."
+
+# Serve the live map tracker at the site root (the repo has no index.html)
+[[redirects]]
+  from = "/"
+  to = "/2live-map-tracker.html"
+  status = 200
